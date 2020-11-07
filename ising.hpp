@@ -8,7 +8,8 @@ class ising
 {
     public:
         ising(std::size_t iters, std::size_t width, unsigned neighbors,
-                std::size_t nimg, double temp, double fstr, std::string backend);
+                std::size_t nimg, unsigned scale, double temp, double fstr,
+                std::string backend);
         double calc_deltaU(unsigned i, unsigned j);
         void set_display_mode(unsigned char mode);
         void set_benchmark_mode(unsigned char mode);
@@ -24,6 +25,7 @@ class ising
         std::size_t width;
         unsigned neighbors;
         unsigned dim;
+        unsigned scale;
         std::size_t nimg;
         double temp;
         double field_strength;

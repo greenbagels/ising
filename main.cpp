@@ -35,6 +35,7 @@ int main(int argc, char* argv[])
         ("cli", "Print images to the terminal")
         ("width", po::value<std::size_t>()->default_value(16), "Set grid width and height")
         ("nimg", po::value<std::size_t>()->default_value(1), "Set number of images to save")
+        ("scale", po::value<unsigned>()->default_value(1), "Set post-process image scaling")
         ("sweeps", po::value<std::size_t>()->default_value(16*16*100), "Set minimum spin-flip iteration count")
         ("temp", po::value<double>()->default_value(2.5), "Set lattice temperature")
         ("fstr", po::value<double>()->default_value(0.0), "Set external field strength")
@@ -76,6 +77,7 @@ int main(int argc, char* argv[])
               vm["width"].as<std::size_t>(),
               vm["neighbors"].as<unsigned>(),
               vm["nimg"].as<std::size_t>(),
+              vm["scale"].as<unsigned>(),
               vm["temp"].as<double>(),
               vm["fstr"].as<double>(),
               vm["backend"].as<std::string>());

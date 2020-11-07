@@ -11,11 +11,13 @@
 #include "ising.hpp"
 
 ising::ising(std::size_t iters, std::size_t width, unsigned neighbors,
-             std::size_t nimg, double temp, double fstr, std::string backend)
+             std::size_t nimg, unsigned scale, double temp, double fstr,
+             std::string backend)
 {
     this->iters = iters;
     this->width = width;
     this->neighbors = neighbors;
+    this->scale = scale;
 
     switch(neighbors)
     {
@@ -201,12 +203,18 @@ inline void ising::flip_spin(std::size_t i, std::size_t j)
 void ising::save_png_snapshot(const char* fname)
 {
     // TODO: generalize to more dims
-    png::image<png::gray_pixel_1> img(width, width);
+    png::image<png::gray_pixel_1> img(scale * width, scale * width);
     for (auto y = 0; y < width; ++y)
     {
-        for (auto x = 0; x < width; x++)
+        for (auto i = 0; i < scale; i++)
         {
-            img[y][x] = png::gray_pixel_1(spins[y * width + x] > 0);
+            for (auto x = 0; x < width; x++)
+            {
+                for (auto j = 0; j < scale; j++)
+                {
+                    img[scale*y + i][scale*x + j] = png::gray_pixel_1(spins[y * width + x] > 0);
+                }
+            }
         }
     }
     img.write(fname);
@@ -216,11 +224,17 @@ void ising::print_snapshot()
 {
     for (auto y = 0; y < width; ++y)
     {
-        for (auto x = 0; x < width; x++)
+        for (auto i = 0; i < scale; i++)
         {
-            std::cout << (spins[y * width + x] > 0 ? '.' : '+');
+            for (auto x = 0; x < width; x++)
+            {
+                for (auto j = 0; j < scale; j++)
+                {
+                    std::cout << (spins[y * width + x] > 0 ? '.' : '+');
+                }
+            }
+            std::cout << '\n';
         }
-        std::cout << '\n';
     }
     std::cout << "\n\n";
 }

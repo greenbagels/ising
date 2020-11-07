@@ -1,181 +1,226 @@
+// C++ Standard Libraries
 #include <iostream>
-#include <cmath>
 #include <random>
 #include <stdexcept>
-#include <omp.h>
-// #include <png.h>
+#include <string>
+
+// System Libraries
 #include <png++/png.hpp>
-// #include <zlib.h>
 
-const auto n = 512lu;
-const auto T = 0.1;
+// Project Libraries
+#include "ising.hpp"
 
-void initialize(int spins[][n])
+ising::ising(std::size_t iters, std::size_t width, unsigned neighbors,
+             std::size_t nimg, double temp, double fstr, std::string backend)
+{
+    this->iters = iters;
+    this->width = width;
+    this->neighbors = neighbors;
+
+    switch(neighbors)
+    {
+        case 2:
+            dim = 1;
+            spins = std::make_unique<char[]>(width);
+            break;
+        case 4:
+            dim = 2;
+            spins = std::make_unique<char[]>(width * width);
+            break;
+        case 6:
+        case 8:
+        case 12:
+            throw std::runtime_error("Not implemented!");
+            break;
+        default:
+            throw std::runtime_error("Option parsing missed invalid neighbor quantity!");
+    }
+
+    initialize_spins();
+
+    this->nimg = nimg;
+    this->temp = temp;
+    this->field_strength = fstr;
+    if (backend == "cpu-serial")
+    {
+        this->backend = 0;
+    }
+    else if (backend == "cpu-parallel")
+    {
+        this->backend = 1;
+    }
+    else if (backend == "gpu")
+    {
+        this->backend = 2;
+    }
+}
+
+double ising::calc_deltaU(unsigned i, unsigned j)
+{
+    int top, bottom, left, right;
+
+    if (i == 0)
+    {
+        top = spins[(width - 1) * width + j];
+        bottom = spins[(i + 1) * width + j];
+    }
+    else if (i == width - 1)
+    {
+        top = spins[(i - 1) * width + j];
+        bottom = spins[0 * width + j];
+    }
+    else
+    {
+        top = spins[(i - 1) * width + j];
+        bottom = spins[(i + 1) * width + j];
+    }
+
+    if (j == 0)
+    {
+        left = spins[i * width + width - 1];
+        right = spins[i * width + j + 1];
+    }
+    else if (j == width - 1)
+    {
+        left = spins[i * width + j - 1];
+        right = spins[i * width + 0];
+    }
+    else
+    {
+        left = spins[i * width + j - 1];
+        right = spins[i * width + j + 1];
+    }
+
+    return 2 * spins[i * width + j] * (top + bottom + left + right);
+}
+
+
+void ising::set_display_mode(unsigned char mode)
+{
+    if (mode < 2)
+    {
+        display_mode = mode;
+    }
+    else
+    {
+        throw std::runtime_error("Invalid display mode supplied!");
+    }
+}
+
+void ising::set_benchmark_mode(unsigned char mode)
+{
+    if (mode < 2)
+    {
+        benchmark_mode = mode;
+    }
+    else
+    {
+        throw std::runtime_error("Invalid benchmark mode supplied!");
+    }
+}
+
+void ising::initialize_spins()
 {
     std::random_device rd;
     std::mt19937 engine(rd());
-//    #pragma omp parallel for
-    for (auto i = 0; i < n; i++)
+
+    std::size_t size;
+
+    if (dim == 1)
     {
-        for (auto j = 0; j < n; j++)
+        size = width;
+    }
+    else if (dim == 2)
+    {
+        size = width * width;
+    }
+    else if (dim == 3)
+    {
+        size = width * width * width;
+        throw std::runtime_error("Dim-3 not implemented!");
+    }
+    else
+    {
+        throw std::runtime_error("Dimensionality constraint violated!");
+    }
+
+    for (auto i = 0; i < size; i++)
+    {
+        spins[i] = 1 - 2 * (engine() % 2);
+    }
+}
+
+void ising::run()
+{
+    std::random_device rd;
+    std::mt19937 engine(rd());
+    std::uniform_int_distribution<int> dist(0, width - 1);
+    std::uniform_real_distribution<double> floatdist;
+    // We aim for 30 seconds of 60Hz footage, so 1800 frames. So let's bump
+    // the limit up as little as necessary:
+    iters += nimg - (iters % nimg);
+    auto step = iters / nimg;
+    std::cerr << "Performing " << iters << " iterations...\n";
+    for (auto t = 0; t < iters; t++)
+    {
+        auto i = dist(engine);
+        auto j = dist(engine);
+        auto dU = calc_deltaU(i, j);
+        if (dU <= 0.)
         {
-            spins[i][j] = 1 - 2 * (engine() % 2);
+            flip_spin(i,j);
+        }
+        else
+        {
+            if (floatdist(engine) < std::exp(-dU / temp))
+            {
+                flip_spin(i,j);
+            }
+        }
+        if (t % (iters / nimg) == 0)
+        {
+            if (display_mode == 0)
+            {
+                print_snapshot();
+            }
+            else
+            {
+                char filename[256];
+                snprintf(filename, 256, "snapshot_%lux%lu_%.8lu.png", width, width, t / step);
+                save_png_snapshot(filename);
+            }
         }
     }
 }
 
-char get_color(int spins[][n], int i, int j)
+inline void ising::flip_spin(std::size_t i, std::size_t j)
 {
-    if (spins[i][j] == 1)
-    {
-        return 'x';
-    }
-    else if (spins[i][j] == -1)
-    {
-        return '.';
-    }
-    else
-    {
-        throw std::runtime_error("Invalid spin state detected!\n");
-    }
+    spins[i * width + j] = -spins[i * width + j];
 }
 
-double calc_deltaU(int spins[][n], int i, int j)
+void ising::save_png_snapshot(const char* fname)
 {
-    int top, bottom, left, right;
-
-    switch (i)
+    // TODO: generalize to more dims
+    png::image<png::gray_pixel_1> img(width, width);
+    for (auto y = 0; y < width; ++y)
     {
-        case 0:
-            top = spins[n - 1][j];
-            bottom = spins[i + 1][j];
-            break;
-        case n-1:
-            top = spins[i - 1][j];
-            bottom = spins[0][j];
-            break;
-        default:
-            top = spins[i - 1][j];
-            bottom = spins[i + 1][j];
-            break;
-    }
-
-    switch (j)
-    {
-        case 0:
-            left = spins[i][n-1];
-            right = spins[i][j+1];
-            break;
-        case n-1:
-            left = spins[i][j-1];
-            right = spins[i][0];
-            break;
-        default:
-            left = spins[i][j-1];
-            right = spins[i][j+1];
-            break;
-    }
-    return 2 * spins[i][j] * (top + bottom + left + right);
-}
-
-void snapshot(const char* fname, int spins[][n])
-{
-    /*
-    FILE *fp = fopen(fname, "wb");
-
-    if (!fp)
-        throw std::runtime_error("File creation failed!");
-
-    png_structp png_ptr = png_create_write_struct
-        (PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-
-    if (!png_ptr)
-        throw std::runtime_error("PNG Pointer creation failed!");
-
-    png_infop info_ptr = png_create_info_struct(png_ptr);
-    if (!info_ptr)
-    {
-        png_destroy_write_struct(&png_ptr, (png_infopp)nullptr);
-        throw std::runtime_error("Info pointer creation failed!");
-    }
-
-    if (setjmp(png_jmpbuf(png_ptr)))
-    {
-        png_destroy_write_struct(&png_ptr, &info_ptr);
-        fclose(fp);
-        throw std::runtime_error("setjmp failed!");
-    }
-
-    png_init_io(png_ptr, fp);
-
-    png_set_IHDR(png_ptr, info_ptr, n, n, 1, PNG_COLOR_TYPE_GRAY,
-            PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
-            PNG_FILTER_TYPE_DEFAULT);
-
-    png_write_info(png_ptr, info_ptr);
-    */
-
-    png::image<png::gray_pixel_1> img(n, n);
-//    #pragma omp parallel for
-    for (auto y = 0; y < n; ++y)
-    {
-        for (auto x = 0; x < n; x++)
+        for (auto x = 0; x < width; x++)
         {
-            img[y][x] = png::gray_pixel_1(spins[y][x] > 0);
+            img[y][x] = png::gray_pixel_1(spins[y * width + x] > 0);
         }
     }
     img.write(fname);
 }
 
-int main()
+void ising::print_snapshot()
 {
-    int (*grid)[n] = new int[n][n];
-    if (grid == nullptr)
+    for (auto y = 0; y < width; ++y)
     {
-        throw std::runtime_error("Grid allocation failed!");
+        for (auto x = 0; x < width; x++)
+        {
+            std::cout << (spins[y * width + x] > 0 ? '.' : '+');
+        }
+        std::cout << '\n';
     }
-    initialize(grid);
-    std::random_device rd;
-    std::mt19937 engine(rd());
-    std::uniform_int_distribution<int> dist(0, n - 1);
-    std::uniform_real_distribution<double> floatdist;
-    auto limit = 100000u*n*n;
-    // We aim for 30 seconds of 60Hz footage, so 1800 frames. So let's bump
-    // the limit up as little as necessary:
-    auto step = limit / 20;
-    std::cout << "Performing " << limit << " iterations...\n";
-    for (auto t = 0; t < limit; t++)
-    {
-        auto i = dist(engine);
-        auto j = dist(engine);
-        auto dU = calc_deltaU(grid, i, j);
-        if (dU <= 0.)
-        {
-            grid[i][j] = -grid[i][j];
-        }
-        else
-        {
-            if (floatdist(engine) < std::exp(-dU / T))
-            {
-                grid[i][j] = -grid[i][j];
-            }
-        }
-        if (t % step == 0)
-        {
-            char filename[256];
-            snprintf(filename, 256, "snapshot_%lux%lu_%.8lu.png", n, n, t / step);
-            snapshot(filename, grid);
-        }
-    }
-
-    /*
-    for (auto i = 0; i < n; i++)
-    {
-        for (auto j = 0; j < n; j++)
-        {
-            std::cout << get_color(grid, i, j);
-        }
-        std::cout << std::endl;
-    }
-    */
+    std::cout << "\n\n";
 }

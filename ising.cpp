@@ -93,7 +93,7 @@ double ising::calc_deltaU(unsigned i, unsigned j)
         right = spins[i * width + j + 1];
     }
 
-    return 2 * spins[i * width + j] * (top + bottom + left + right);
+    return 2 * spins[i * width + j] * (top + bottom + left + right + field_strength);
 }
 
 
@@ -158,9 +158,12 @@ void ising::run()
     std::mt19937 engine(rd());
     std::uniform_int_distribution<int> dist(0, width - 1);
     std::uniform_real_distribution<double> floatdist;
-    // We aim for 30 seconds of 60Hz footage, so 1800 frames. So let's bump
-    // the limit up as little as necessary:
-    iters += nimg - (iters % nimg);
+    // We want to print `nimg` images, so we print every `iter/nimg` step. But
+    // this isn't always an integer, so let's increase iter until it is.
+    if (iters % nimg)
+    {
+        iters += nimg - (iters % nimg);
+    }
     auto step = iters / nimg;
     std::cerr << "Performing " << iters << " iterations...\n";
     for (auto t = 0; t < iters; t++)
@@ -179,7 +182,7 @@ void ising::run()
                 flip_spin(i,j);
             }
         }
-        if (t % (iters / nimg) == 0)
+        if ((t+1) % step == 0)
         {
             if (display_mode == 0)
             {

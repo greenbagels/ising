@@ -1,0 +1,8 @@
+*.out
+ising++
+*.cmake
+*.o
+*.a
+*.png
+build/*
+output/*

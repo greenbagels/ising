@@ -9,17 +9,21 @@
 
 // Project Libraries
 #include "ising.hpp"
+#include "data.hpp"
 
-ising::ising(std::size_t iters, std::size_t width, unsigned neighbors,
+ising::ising(std::size_t sweeps, std::size_t width, unsigned num_neighbors,
              std::size_t nimg, unsigned scale, double temp, double fstr,
              std::string backend)
 {
-    this->iters = iters;
+    this->sweeps = sweeps;
+    data.E.reserve(sweeps);
+    data.m.reserve(sweeps);
+
     this->width = width;
-    this->neighbors = neighbors;
+    this->num_neighbors = num_neighbors;
     this->scale = scale;
 
-    switch(neighbors)
+    switch(num_neighbors)
     {
         case 2:
             dim = 1;
@@ -59,41 +63,99 @@ ising::ising(std::size_t iters, std::size_t width, unsigned neighbors,
 
 double ising::calc_deltaU(unsigned i, unsigned j)
 {
-    int top, bottom, left, right;
+    neighbors nb = get_neighbors(i, j);
+
+    return 2 * spins[i * width + j] * (nb.top + nb.bottom + nb.left + nb.right + field_strength);
+}
+
+neighbors ising::get_neighbors(unsigned i, unsigned j)
+{
+    neighbors nb;
 
     if (i == 0)
     {
-        top = spins[(width - 1) * width + j];
-        bottom = spins[(i + 1) * width + j];
+        nb.top = get_spin(width - 1, j);
+        nb.bottom = get_spin(i + 1, j);
+
     }
     else if (i == width - 1)
     {
-        top = spins[(i - 1) * width + j];
-        bottom = spins[0 * width + j];
+        nb.top = get_spin(i - 1, j);
+        nb.bottom = get_spin(0, j);
     }
     else
     {
-        top = spins[(i - 1) * width + j];
-        bottom = spins[(i + 1) * width + j];
+        nb.top = get_spin(i-1, j);
+        nb.bottom = get_spin(i+1, j);
     }
 
     if (j == 0)
     {
-        left = spins[i * width + width - 1];
-        right = spins[i * width + j + 1];
+        nb.left = get_spin(i, width - 1);
+        nb.right = get_spin(i, j + 1);
     }
     else if (j == width - 1)
     {
-        left = spins[i * width + j - 1];
-        right = spins[i * width + 0];
+        nb.left = get_spin(i, j - 1);
+        nb.right = get_spin(i, 0);
     }
     else
     {
-        left = spins[i * width + j - 1];
-        right = spins[i * width + j + 1];
+        nb.left = get_spin(i, j - 1);
+        nb.right = get_spin(i, j + 1);
     }
 
-    return 2 * spins[i * width + j] * (top + bottom + left + right + field_strength);
+    int check = nb.left * nb.right * nb.top * nb.bottom;
+    check = check * check;
+    if (check != 1)
+    {
+        std::cerr << "Error: some neighbors have garbage values! " + std::to_string(check) << std::endl;
+    }
+    return nb;
+}
+
+double ising::calc_totalU()
+{
+    auto total = 0.;
+
+    // Our Hamiltonian is H = -epsilon*Sum[(s_i)(s_j)] - h sum[s_i]
+    // So at every cell site, you sum neighbor interactions
+
+    // Normal Stencil:
+    //    |
+    //  --+
+    //
+    //  Right Edge Stencil:
+    //    |
+    //  --+--
+    //
+    //  Bottom Edge Stencil:
+    //    |
+    //  --+
+    //    |
+    //
+    for (auto i = 0; i < width; i++)
+    {
+        for (auto j = 0; j < width; j++)
+        {
+            double interactions = 0.;
+            neighbors nb = get_neighbors(i,j);
+
+            interactions += nb.top + nb.left + field_strength;
+
+            if (i == width-1)
+            {
+                interactions += nb.bottom;
+            }
+            if (j == width-1)
+            {
+                interactions += nb.right;
+            }
+
+            total -= get_spin(i,j) * interactions;
+        }
+    }
+    return total;
 }
 
 
@@ -160,20 +222,27 @@ void ising::run()
     std::uniform_real_distribution<double> floatdist;
     // We want to print `nimg` images, so we print every `iter/nimg` step. But
     // this isn't always an integer, so let's increase iter until it is.
-    if (iters % nimg)
-    {
-        iters += nimg - (iters % nimg);
-    }
-    auto step = iters / nimg;
+    auto iters = sweeps * width;
+    double total_E = 0.;
     std::cerr << "Performing " << iters << " iterations...\n";
     for (auto t = 0; t < iters; t++)
     {
         auto i = dist(engine);
         auto j = dist(engine);
         auto dU = calc_deltaU(i, j);
+
         if (dU <= 0.)
         {
+            auto u1 = calc_totalU();
             flip_spin(i,j);
+            auto u2 = calc_totalU();
+
+            auto totald = (u2-u1) - dU;
+            // TODO: diagnose why we are getting errors as bad as 2...
+            if (totald > 4)
+            {
+                throw std::runtime_error("Energy " + std::to_string(totald) + " doesn't match!");
+            }
         }
         else
         {
@@ -182,8 +251,18 @@ void ising::run()
                 flip_spin(i,j);
             }
         }
-        if ((t+1) % step == 0)
+
+        // Equilibrium sweeps contribute to energy average
+        if (t > 10*width*width)
         {
+            total_E += calc_totalU();
+        }
+
+        // Now, handle visualization
+        if ((t+1) % width == 0)
+        {
+            data.E.push_back(calc_totalU());
+            /*
             if (display_mode == 0)
             {
                 print_snapshot();
@@ -191,16 +270,31 @@ void ising::run()
             else
             {
                 char filename[256];
-                snprintf(filename, 256, "snapshot_%lux%lu_%.8lu.png", width, width, t / step);
+                snprintf(filename, 256, "snapshot_%lux%lu_%.8lu.png", width, width, t / width);
                 save_png_snapshot(filename);
             }
+            std::cerr << "Total energy at sweep " << t / width << " is " << data.E.at(t / width) << std::endl;
+            */
         }
     }
+    data.equilibrium_E = total_E / (iters - 10 * width * width);
+    std::cerr << "Equilibrium E: " << data.equilibrium_E << std::endl;
 }
 
 inline void ising::flip_spin(std::size_t i, std::size_t j)
 {
-    spins[i * width + j] = -spins[i * width + j];
+    auto spin = get_spin(i,j);
+
+    if (spin * spin != 1)
+    {
+        throw std::runtime_error("Invalid spin detected");
+    }
+    spins[i * width + j] = -spin;
+}
+
+int ising::get_spin(std::size_t i, std::size_t j) const
+{
+    return spins[i * width + j];
 }
 
 void ising::save_png_snapshot(const char* fname)
@@ -215,7 +309,7 @@ void ising::save_png_snapshot(const char* fname)
             {
                 for (auto j = 0; j < scale; j++)
                 {
-                    img[scale*y + i][scale*x + j] = png::gray_pixel_1(spins[y * width + x] > 0);
+                    img[scale*y + i][scale*x + j] = png::gray_pixel_1(get_spin(y,x) > 0);
                 }
             }
         }
@@ -233,7 +327,7 @@ void ising::print_snapshot()
             {
                 for (auto j = 0; j < scale; j++)
                 {
-                    std::cout << (spins[y * width + x] > 0 ? '.' : '+');
+                    std::cout << (get_spin(y,x) > 0 ? '.' : '+');
                 }
             }
             std::cout << '\n';

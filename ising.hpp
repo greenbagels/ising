@@ -4,10 +4,20 @@
 #include <memory>
 #include <string>
 
+#include "data.hpp"
+
+struct neighbors
+{
+    int top;
+    int bottom;
+    int left;
+    int right;
+};
+
 class ising
 {
     public:
-        ising(std::size_t iters, std::size_t width, unsigned neighbors,
+        ising(std::size_t sweeps, std::size_t width, unsigned num_neighbors,
                 std::size_t nimg, unsigned scale, double temp, double fstr,
                 std::string backend);
         double calc_deltaU(unsigned i, unsigned j);
@@ -18,12 +28,15 @@ class ising
     private:
         void initialize_spins();
         void flip_spin(std::size_t i, std::size_t j);
+        int get_spin(std::size_t i, std::size_t j) const;
+        neighbors get_neighbors(unsigned i, unsigned j);
+        double calc_totalU();
         void save_png_snapshot(const char* fname);
         void print_snapshot();
 
-        std::size_t iters;
+        std::size_t sweeps;
         std::size_t width;
-        unsigned neighbors;
+        unsigned num_neighbors;
         unsigned dim;
         unsigned scale;
         std::size_t nimg;
@@ -35,6 +48,8 @@ class ising
 
         unsigned char display_mode;
         unsigned char benchmark_mode;
+
+        event_data data;
 };
 
 #endif

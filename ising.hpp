@@ -31,6 +31,7 @@ class ising
         int get_spin(std::size_t i, std::size_t j) const;
         neighbors get_neighbors(unsigned i, unsigned j);
         double calc_totalU();
+        double calc_totalM();
         void save_png_snapshot(const char* fname);
         void print_snapshot();
 

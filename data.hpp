@@ -6,12 +6,12 @@
 class event_data
 {
     public:
-        // Energy
+        // A T-indexed array of fluctuations
         std::vector<double> E;
-        std::vector<double> equilibrium_E;
-        // Magnetization
-        std::vector<double> m;
-        std::vector<double> equilibrium_m;
+        std::vector<double> E_fluc;
+        // A T-indexed array of magnetizations
+        std::vector<double> M;
+        std::vector<double> M_fluc;
 
         std::vector<double> T;
 };

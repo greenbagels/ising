@@ -6,6 +6,7 @@
 
 // System Libraries
 #include <png++/png.hpp>
+#include <omp.h>
 
 // Project Libraries
 #include "ising.hpp"
@@ -17,7 +18,9 @@ ising::ising(std::size_t sweeps, std::size_t width, unsigned num_neighbors,
 {
     this->sweeps = sweeps;
     data.E.reserve(sweeps);
-    data.m.reserve(sweeps);
+    data.E_fluc.reserve(sweeps);
+    data.M.reserve(sweeps);
+    data.M_fluc.reserve(sweeps);
 
     this->width = width;
     this->num_neighbors = num_neighbors;
@@ -134,6 +137,7 @@ double ising::calc_totalU()
     //  --+
     //    |
     //
+//    #pragma omp parallel for
     for (auto i = 0; i < width; i++)
     {
         for (auto j = 0; j < width; j++)
@@ -158,6 +162,19 @@ double ising::calc_totalU()
     return total;
 }
 
+double ising::calc_totalM()
+{
+    auto total = 0.;
+
+    for (auto i = 0; i < width; i++)
+    {
+        for (auto j = 0; j < width; j++)
+        {
+            total += get_spin(i,j);
+        }
+    }
+    return total;
+}
 
 void ising::set_display_mode(unsigned char mode)
 {
@@ -208,6 +225,7 @@ void ising::initialize_spins()
         throw std::runtime_error("Dimensionality constraint violated!");
     }
 
+//    #pragma omp parallel for
     for (auto i = 0; i < size; i++)
     {
         spins[i] = 1 - 2 * (engine() % 2);
@@ -222,11 +240,16 @@ void ising::run()
     std::uniform_real_distribution<double> floatdist;
     // We want to print `nimg` images, so we print every `iter/nimg` step. But
     // this isn't always an integer, so let's increase iter until it is.
-    for (auto T = 0.; T < 15; T += 15)
+    for (auto T = 0.; T < 6; T += 0.01)
     {
         initialize_spins();
         auto iters = sweeps * width;
-        double total_E = 0.;
+
+        double avg_E = 0.;
+        double avg_E_square = 0.;
+        double avg_M = 0.;
+        double avg_M_square = 0.;
+
         data.T.push_back(T);
         std::cerr << "Performing " << iters << " iterations...\n";
         for (auto t = 0; t < iters; t++)
@@ -237,31 +260,38 @@ void ising::run()
 
             if (dU <= 0.)
             {
-                auto u1 = calc_totalU();
+                //auto u1 = calc_totalU();
                 flip_spin(i,j);
-                auto u2 = calc_totalU();
+                //auto u2 = calc_totalU();
 
-                auto totald = (u2-u1) - dU;
+                //auto totald = (u2-u1) - dU;
                 // TODO: diagnose why we are getting errors as bad as 2...
-                if (totald > 4)
+                //if (totald > 4)
                 {
-                    throw std::runtime_error("Energy " + std::to_string(totald) + " doesn't match!");
+                //    throw std::runtime_error("Energy " + std::to_string(totald) + " doesn't match!");
                 }
             }
             else
             {
-                /*
-                if (floatdist(engine) < std::exp(-dU / T))
+                // If T approaches zero, then the boltzmann factor becomes infinitely small
+                if (T != 0.)
                 {
-                    flip_spin(i,j);
+                    if (floatdist(engine) < std::exp(-dU / T))
+                    {
+                        flip_spin(i,j);
+                    }
                 }
-                */
             }
 
-            // Equilibrium sweeps contribute to energy average
+            // Equilibrium sweeps contribute to equilibirum averages
             if (t > 10*width*width)
             {
-                total_E += calc_totalU();
+                auto E = calc_totalU();
+                avg_E += E;
+                avg_E_square += E * E;
+                auto M = calc_totalM();
+                avg_M += M;
+                avg_M_square += M * M;
             }
 
             /* Now, handle visualization
@@ -282,15 +312,25 @@ void ising::run()
             }
             */
         }
-        data.equilibrium_E.push_back(total_E / (iters - 10 * width * width));
-        std::cerr << "Equilibrium E: " << data.equilibrium_E.back() << std::endl;
+
+        auto count = iters - 10 * width * width;
+        avg_E /= count;
+        avg_E_square /= count;
+        avg_M /= count;
+        avg_M_square /= count;
+
+        data.E.push_back(avg_E);
+        data.E_fluc.push_back(avg_E_square - avg_E * avg_E);
+        data.M.push_back(avg_M);
+        data.M_fluc.push_back(avg_M_square - avg_M * avg_M);
+        std::cerr << "Equilibrium E: " << data.E.back() << std::endl;
     }
 
-    std::ofstream E_file("energy2.dat");
+    std::ofstream f1("output_" + std::to_string(width) + ".dat");
 
     for (auto i = 0; i < data.T.size(); i++)
     {
-        E_file << 0.05 + static_cast<double>(i)*0.05 << " " << data.equilibrium_E[i] << "\n";
+        f1 << static_cast<double>(i)*0.05 << " " << data.E[i] << " " << data.E_fluc[i] << " " << data.M[i] << " " << data.M_fluc[i] << "\n";
     }
 }
 

@@ -4,9 +4,13 @@
 #include <stdexcept>
 #include <string>
 
+// C Libraries
+#include <stdio.h>
+
 // System Libraries
 #include <png++/png.hpp>
 #include <omp.h>
+#include <cuda.h>
 
 // Project Libraries
 #include "ising.hpp"
@@ -115,6 +119,79 @@ neighbors ising::get_neighbors(unsigned i, unsigned j)
         std::cerr << "Error: some neighbors have garbage values! " + std::to_string(check) << std::endl;
     }
     return nb;
+}
+
+__global__ void cudaCalcTotalU(int width, int *grid, double *interactions, double h)
+{
+    int id = threadIdx.x;
+    if (id < width * width)
+    {
+        int y = id / width;
+        int x = id % width;
+
+        int top, bottom, left, right;
+
+        int spin = grid[id];
+
+        if (y == 0)
+        {
+            top = grid[(width-1)*width + x];
+            bottom = grid[width + x];
+        }
+        else if (y == width - 1)
+        {
+            top = grid[(y-1) * width + x];
+            bottom = grid[x];
+        }
+        else
+        {
+            top = grid[(y-1)*width + x];
+            bottom = grid[(y+1)*width + x];
+        }
+
+        if (x == 0)
+        {
+            left = grid[y*width + width-1];
+            right = grid[y*width + 1];
+        }
+        else if (x == width - 1)
+        {
+            left = grid[y*width+width-2];
+            right = grid[y*width];
+        }
+        else
+        {
+            left = grid[y*width + x - 1];
+            right = grid[y*width + x + 1];
+        }
+        printf("%d %d %d %d\n", top, bottom, left, right);
+        assert(top * top + bottom * bottom + left * left * right * right == 4);
+        printf("%d %d %d %d\n", top, bottom, left, right);
+
+        interactions[id] = grid[id] * (h + top + left + (y == width-1) * bottom + (x == width-1) * right);
+    }
+
+}
+
+__global__ void reduce(double *in)
+{
+    int id = threadIdx.x;
+
+    auto stride = 1;
+    int threads = blockDim.x;
+
+    while (threads > 0)
+    {
+        if (id < threads)
+        {
+            auto idx1 = id * stride * 2;
+            auto idx2 = idx1 + stride;
+            in[idx1] += in[idx2];
+        }
+
+        stride <<= 1;
+        threads >>= 1;
+    }
 }
 
 double ising::calc_totalU()
@@ -286,7 +363,31 @@ void ising::run()
             // Equilibrium sweeps contribute to equilibirum averages
             if (t > 10*width*width)
             {
-                auto E = calc_totalU();
+                cudaError_t err;
+                int *d_spins;
+                double *d_interactions;
+                err = cudaMalloc(&d_spins, width*width*sizeof(int));
+                if (err != cudaSuccess) std::cerr << cudaGetErrorString(err) << std::endl;
+                err =cudaMalloc(&d_interactions, width*width*sizeof(double));
+                if (err != cudaSuccess) std::cerr << cudaGetErrorString(err) << std::endl;
+                err =cudaMemcpy(d_spins, spins.get(), width*sizeof(int), cudaMemcpyHostToDevice);
+                if (err != cudaSuccess) std::cerr << cudaGetErrorString(err) << std::endl;
+                err =cudaDeviceSynchronize();
+                if (err != cudaSuccess) std::cerr << cudaGetErrorString(err) << std::endl;
+                cudaCalcTotalU<<<1, width*width>>>(width, d_spins, d_interactions, field_strength);
+                err =cudaDeviceSynchronize();
+                if (err != cudaSuccess) std::cerr << cudaGetErrorString(err) << std::endl;
+                // reduce<<<1, width*width>>>(d_interactions);
+                err = cudaDeviceSynchronize();
+                if (err != cudaSuccess) std::cerr << cudaGetErrorString(err) << std::endl;
+                double E;
+                err = cudaMemcpy(&E, d_interactions, sizeof(double), cudaMemcpyDeviceToHost);
+                if (err != cudaSuccess) std::cerr << cudaGetErrorString(err) << std::endl;
+                err =cudaFree(d_spins);
+                if (err != cudaSuccess) std::cerr << cudaGetErrorString(err) << std::endl;
+                err =cudaFree(d_interactions);
+                if (err != cudaSuccess) std::cerr << cudaGetErrorString(err) << std::endl;
+                // std::cerr << "E has value " << E << std::endl;
                 avg_E += E;
                 avg_E_square += E * E;
                 auto M = calc_totalM();

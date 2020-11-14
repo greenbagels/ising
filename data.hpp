@@ -8,10 +8,12 @@ class event_data
     public:
         // Energy
         std::vector<double> E;
-        double equilibrium_E;
+        std::vector<double> equilibrium_E;
         // Magnetization
         std::vector<double> m;
-        double equilibrium_m;
+        std::vector<double> equilibrium_m;
+
+        std::vector<double> T;
 };
 
 #endif

@@ -222,63 +222,76 @@ void ising::run()
     std::uniform_real_distribution<double> floatdist;
     // We want to print `nimg` images, so we print every `iter/nimg` step. But
     // this isn't always an integer, so let's increase iter until it is.
-    auto iters = sweeps * width;
-    double total_E = 0.;
-    std::cerr << "Performing " << iters << " iterations...\n";
-    for (auto t = 0; t < iters; t++)
+    for (auto T = 0.; T < 15; T += 15)
     {
-        auto i = dist(engine);
-        auto j = dist(engine);
-        auto dU = calc_deltaU(i, j);
-
-        if (dU <= 0.)
+        initialize_spins();
+        auto iters = sweeps * width;
+        double total_E = 0.;
+        data.T.push_back(T);
+        std::cerr << "Performing " << iters << " iterations...\n";
+        for (auto t = 0; t < iters; t++)
         {
-            auto u1 = calc_totalU();
-            flip_spin(i,j);
-            auto u2 = calc_totalU();
+            auto i = dist(engine);
+            auto j = dist(engine);
+            auto dU = calc_deltaU(i, j);
 
-            auto totald = (u2-u1) - dU;
-            // TODO: diagnose why we are getting errors as bad as 2...
-            if (totald > 4)
+            if (dU <= 0.)
             {
-                throw std::runtime_error("Energy " + std::to_string(totald) + " doesn't match!");
-            }
-        }
-        else
-        {
-            if (floatdist(engine) < std::exp(-dU / temp))
-            {
+                auto u1 = calc_totalU();
                 flip_spin(i,j);
-            }
-        }
+                auto u2 = calc_totalU();
 
-        // Equilibrium sweeps contribute to energy average
-        if (t > 10*width*width)
-        {
-            total_E += calc_totalU();
-        }
-
-        // Now, handle visualization
-        if ((t+1) % width == 0)
-        {
-            data.E.push_back(calc_totalU());
-            /*
-            if (display_mode == 0)
-            {
-                print_snapshot();
+                auto totald = (u2-u1) - dU;
+                // TODO: diagnose why we are getting errors as bad as 2...
+                if (totald > 4)
+                {
+                    throw std::runtime_error("Energy " + std::to_string(totald) + " doesn't match!");
+                }
             }
             else
             {
-                char filename[256];
-                snprintf(filename, 256, "snapshot_%lux%lu_%.8lu.png", width, width, t / width);
-                save_png_snapshot(filename);
+                /*
+                if (floatdist(engine) < std::exp(-dU / T))
+                {
+                    flip_spin(i,j);
+                }
+                */
             }
-            std::cerr << "Total energy at sweep " << t / width << " is " << data.E.at(t / width) << std::endl;
+
+            // Equilibrium sweeps contribute to energy average
+            if (t > 10*width*width)
+            {
+                total_E += calc_totalU();
+            }
+
+            /* Now, handle visualization
+            if ((t+1) % width == 0)
+            {
+                data.E.push_back(calc_totalU());
+                if (display_mode == 0)
+                {
+                    print_snapshot();
+                }
+                else
+                {
+                    char filename[256];
+                    snprintf(filename, 256, "snapshot_%lux%lu_%.8lu.png", width, width, t / width);
+                    save_png_snapshot(filename);
+                }
+                std::cerr << "Total energy at sweep " << t / width << " is " << data.E.at(t / width) << std::endl;
+            }
             */
         }
+        data.equilibrium_E.push_back(total_E / (iters - 10 * width * width));
+        std::cerr << "Equilibrium E: " << data.equilibrium_E.back() << std::endl;
     }
-    data.equilibrium_E = total_E / (iters - 10 * width * width);
-    std::cerr << "Equilibrium E: " << data.equilibrium_E << std::endl;
+
+    std::ofstream E_file("energy2.dat");
+
+    for (auto i = 0; i < data.T.size(); i++)
+    {
+        E_file << 0.05 + static_cast<double>(i)*0.05 << " " << data.equilibrium_E[i] << "\n";
+    }
 }
 
 inline void ising::flip_spin(std::size_t i, std::size_t j)

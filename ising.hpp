@@ -45,6 +45,9 @@ class ising
         double field_strength;
         char backend;
 
+        double total_U;
+        double total_M;
+
         std::unique_ptr<char[]> spins;
 
         unsigned char display_mode;

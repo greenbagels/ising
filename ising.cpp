@@ -17,10 +17,12 @@ ising::ising(std::size_t sweeps, std::size_t width, unsigned num_neighbors,
              std::string backend)
 {
     this->sweeps = sweeps;
+    /*
     data.E.reserve(sweeps);
     data.E_fluc.reserve(sweeps);
     data.M.reserve(sweeps);
     data.M_fluc.reserve(sweeps);
+    */
 
     this->width = width;
     this->num_neighbors = num_neighbors;
@@ -46,6 +48,8 @@ ising::ising(std::size_t sweeps, std::size_t width, unsigned num_neighbors,
     }
 
     initialize_spins();
+    total_U = calc_totalU();
+    total_M = calc_totalM();
 
     this->nimg = nimg;
     this->temp = temp;
@@ -123,6 +127,7 @@ double ising::calc_totalU()
 
     // Our Hamiltonian is H = -epsilon*Sum[(s_i)(s_j)] - h sum[s_i]
     // So at every cell site, you sum neighbor interactions
+    // Let's ignore boundary conditions and only calculate grid energies
 
     // Normal Stencil:
     //    |
@@ -242,7 +247,8 @@ void ising::run()
     // this isn't always an integer, so let's increase iter until it is.
     for (auto T = 0.; T < 6; T += 0.01)
     {
-        initialize_spins();
+        // Reuse previous state:
+        // initialize_spins();
         auto iters = sweeps * width;
 
         double avg_E = 0.;
@@ -250,6 +256,9 @@ void ising::run()
         double avg_M = 0.;
         double avg_M_square = 0.;
 
+        std::size_t count = 0;
+
+        data.cf.push_back(std::vector<double>(width / 2, 0.));
         data.T.push_back(T);
         std::cerr << "Performing " << iters << " iterations...\n";
         for (auto t = 0; t < iters; t++)
@@ -263,6 +272,8 @@ void ising::run()
                 //auto u1 = calc_totalU();
                 flip_spin(i,j);
                 //auto u2 = calc_totalU();
+                total_U += dU;
+                total_M += 2*get_spin(i,j);
 
                 //auto totald = (u2-u1) - dU;
                 // TODO: diagnose why we are getting errors as bad as 2...
@@ -279,19 +290,57 @@ void ising::run()
                     if (floatdist(engine) < std::exp(-dU / T))
                     {
                         flip_spin(i,j);
+                        total_U += dU;
+                        total_M += 2*get_spin(i,j);
                     }
                 }
             }
 
-            // Equilibrium sweeps contribute to equilibirum averages
-            if (t > 10*width*width)
+            if (!(t % width * width) && t > 100*width * width)
             {
-                auto E = calc_totalU();
-                avg_E += E;
-                avg_E_square += E * E;
-                auto M = calc_totalM();
-                avg_M += M;
-                avg_M_square += M * M;
+
+                // Equilibrium sweeps contribute to equilibirum averages
+                avg_E += total_U;
+                avg_E_square += total_U * total_U;
+                avg_M += total_M;
+                avg_M_square += total_M * total_M;
+
+                auto avg_spin = 0.;
+
+                for (auto i = 0u; i < width; i++)
+                {
+                    for (auto j = 0u; j < width; j++)
+                    {
+                        avg_spin += get_spin(i,j);
+                    }
+                }
+
+                avg_spin /= width * width;
+
+                for (auto i = 0; i < width/2; i++)
+                {
+                    double correlation = 0.;
+                    int count = 0;
+                    for (auto y = 0; y < width/2 - i; y++)
+                    {
+                        for (auto x = 0; x < width/2 - i; x++)
+                        {
+                            correlation += get_spin(y,x) * (get_spin(y,x+i) + get_spin(y+i, x)); 
+                            count++;
+                        }
+                    }
+                    correlation = correlation / count - avg_spin * avg_spin;
+                    data.cf.back()[i] += correlation;
+                }
+
+                /*
+                if (t >  iters - 5000 * width * width)
+                {
+                    data.M_sweeps.push_back(M);
+                    data.E_sweeps.push_back(E);
+                }
+                */
+                count++;
             }
 
             /* Now, handle visualization
@@ -313,24 +362,64 @@ void ising::run()
             */
         }
 
-        auto count = iters - 10 * width * width;
         avg_E /= count;
         avg_E_square /= count;
         avg_M /= count;
         avg_M_square /= count;
+        for (auto i = 0; i != data.cf.back().size(); i++)
+        {
+            data.cf.back()[i] /= count;
+        }
 
-        data.E.push_back(avg_E);
+        /*
+        auto start_i = 0;
+        unsigned corr_len;
+        for (auto i = start_i; i != data.cf.back().size(); i++)
+        {
+            if (data.cf.back()[start_i] == 0.)
+            {
+                start_i++;
+                continue;
+            }
+            double diff = data.cf.back()[i]/data.cf.back()[start_i];
+
+            if (diff >= 2.718)
+            {
+               corr_len = (i - start_i)+1;
+            }
+        }*/
+
+        // The entropy at T=0 is zero, but at any other state we get it by forward-derivatives:
+        data.S.push_back(T == 0. ? 0. : data.S.back() + (avg_E - data.avg_E.back())/ T); 
+        data.avg_E.push_back(avg_E);
         data.E_fluc.push_back(avg_E_square - avg_E * avg_E);
-        data.M.push_back(avg_M);
+        data.avg_M.push_back(avg_M);
         data.M_fluc.push_back(avg_M_square - avg_M * avg_M);
-        std::cerr << "Equilibrium E: " << data.E.back() << std::endl;
+        // The heat capacity is the energy fluctiation divided by Temp^2:
+        data.C_v.push_back( T == 0. ? NAN : data.M_fluc.back() / (T * T));
+        // data.cf_len.push_back(corr_len);
+        std::cerr << "Equilibrium E: " << data.avg_E.back() << std::endl;
     }
 
     std::ofstream f1("output_" + std::to_string(width) + ".dat");
 
     for (auto i = 0; i < data.T.size(); i++)
     {
-        f1 << static_cast<double>(i)*0.05 << " " << data.E[i] << " " << data.E_fluc[i] << " " << data.M[i] << " " << data.M_fluc[i] << "\n";
+        f1 << static_cast<double>(i)*0.01 << " " << data.avg_E[i] << " " << data.E_fluc[i] << " " << data.avg_M[i] << " " << data.M_fluc[i] << " " << data.S[i] << " " << data.C_v[i] << "\n";
+    }
+
+    std::ofstream f2("sweeps_" + std::to_string(width) + ".dat");
+
+    for (auto i = 0; i < data.E_sweeps.size(); i++)
+    {
+        f2 << i << " " << data.E_sweeps[i] << " " << data.M_sweeps[i] << "\n";
+    }
+
+    std::ofstream f3("cfs_" + std::to_string(width) + ".dat");
+
+    for (auto j = 0; j < data.cf.back().size(); j++)
+    {
+       f3 << j << " " << data.cf[15][j] << "\n";
     }
 }
 

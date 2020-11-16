@@ -33,6 +33,7 @@ int main(int argc, char* argv[])
         ("help", "Print help info")
         ("benchmark", "Perform single-iteration benchmark")
         ("cli", "Print images to the terminal")
+        ("clean-runs", "Reset grid state between temperatures")
         ("width", po::value<std::size_t>()->default_value(16), "Set grid width and height")
         ("nimg", po::value<std::size_t>()->default_value(1), "Set number of images to save")
         ("scale", po::value<unsigned>()->default_value(1), "Set post-process image scaling")
@@ -82,6 +83,8 @@ int main(int argc, char* argv[])
               vm["fstr"].as<double>(),
               vm["backend"].as<std::string>());
 
+    // TODO: these are class invariants; they should be set by the constructor
+    // probably
     if (vm.count("cli"))
     {
         sim.set_display_mode(0);
@@ -98,6 +101,15 @@ int main(int argc, char* argv[])
     else
     {
         sim.set_benchmark_mode(0);
+    }
+
+    if (vm.count("clean-runs"))
+    {
+        sim.set_sanitizer(1);
+    }
+    else
+    {
+        sim.set_sanitizer(0);
     }
 
     sim.run();

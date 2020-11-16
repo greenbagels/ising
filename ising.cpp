@@ -48,8 +48,6 @@ ising::ising(std::size_t sweeps, std::size_t width, unsigned num_neighbors,
     }
 
     initialize_spins();
-    total_U = calc_totalU();
-    total_M = calc_totalM();
 
     this->nimg = nimg;
     this->temp = temp;
@@ -79,38 +77,10 @@ neighbors ising::get_neighbors(unsigned i, unsigned j)
 {
     neighbors nb;
 
-    if (i == 0)
-    {
-        nb.top = get_spin(width - 1, j);
-        nb.bottom = get_spin(i + 1, j);
-
-    }
-    else if (i == width - 1)
-    {
-        nb.top = get_spin(i - 1, j);
-        nb.bottom = get_spin(0, j);
-    }
-    else
-    {
-        nb.top = get_spin(i-1, j);
-        nb.bottom = get_spin(i+1, j);
-    }
-
-    if (j == 0)
-    {
-        nb.left = get_spin(i, width - 1);
-        nb.right = get_spin(i, j + 1);
-    }
-    else if (j == width - 1)
-    {
-        nb.left = get_spin(i, j - 1);
-        nb.right = get_spin(i, 0);
-    }
-    else
-    {
-        nb.left = get_spin(i, j - 1);
-        nb.right = get_spin(i, j + 1);
-    }
+    nb.left = get_spin(i, j-1);
+    nb.right = get_spin(i, j+1);
+    nb.top = get_spin(i-1, j);
+    nb.bottom = get_spin(i+1, j);
 
     int check = nb.left * nb.right * nb.top * nb.bottom;
     check = check * check;
@@ -147,10 +117,10 @@ double ising::calc_totalU()
     {
         for (auto j = 0; j < width; j++)
         {
-            double interactions = 0.;
+            int interactions = 0;
             neighbors nb = get_neighbors(i,j);
 
-            interactions += nb.top + nb.left + field_strength;
+            interactions += nb.top + nb.left;
 
             if (i == width-1)
             {
@@ -161,11 +131,23 @@ double ising::calc_totalU()
                 interactions += nb.right;
             }
 
-            total -= get_spin(i,j) * interactions;
+            total -= get_spin(i,j) * (static_cast<double>(interactions) + field_strength);
         }
     }
     return total;
 }
+
+/*
+double ising::calc_S(std::size_t n, double dT)
+{
+    double ll, l, r, rr;
+
+    if (n == 0)
+    {
+        return 0.;
+    }
+}
+*/
 
 double ising::calc_totalM()
 {
@@ -235,6 +217,8 @@ void ising::initialize_spins()
     {
         spins[i] = 1 - 2 * (engine() % 2);
     }
+    total_U = calc_totalU();
+    total_M = calc_totalM();
 }
 
 void ising::run()
@@ -248,7 +232,9 @@ void ising::run()
     for (auto T = 0.; T < 6; T += 0.01)
     {
         // Reuse previous state:
-        // initialize_spins();
+        if (sanitize)
+            initialize_spins();
+
         auto iters = sweeps * width;
 
         double avg_E = 0.;
@@ -423,7 +409,7 @@ void ising::run()
     }
 }
 
-inline void ising::flip_spin(std::size_t i, std::size_t j)
+inline void ising::flip_spin(long i, long j)
 {
     auto spin = get_spin(i,j);
 
@@ -434,9 +420,23 @@ inline void ising::flip_spin(std::size_t i, std::size_t j)
     spins[i * width + j] = -spin;
 }
 
-int ising::get_spin(std::size_t i, std::size_t j) const
+char ising::get_spin(long i, long j) const
 {
-    return spins[i * width + j];
+    // We will manually enforce periodic BCs here:
+    long modi, modj;
+    modi = i % static_cast<long>(width);
+    modj = j % static_cast<long>(width);
+
+    if (modi < 0)
+    {
+        modi += width;
+    }
+    if (modj < 0)
+    {
+        modj += width;
+    }
+
+    return spins[modi * width + modj];
 }
 
 void ising::save_png_snapshot(const char* fname)
@@ -476,4 +476,9 @@ void ising::print_snapshot()
         }
     }
     std::cout << "\n\n";
+}
+
+void ising::set_sanitizer(bool flag)
+{
+    sanitize = flag;
 }

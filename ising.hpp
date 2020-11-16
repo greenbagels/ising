@@ -23,12 +23,13 @@ class ising
         double calc_deltaU(unsigned i, unsigned j);
         void set_display_mode(unsigned char mode);
         void set_benchmark_mode(unsigned char mode);
+        void set_sanitizer(bool flag);
         void run();
 
     private:
         void initialize_spins();
-        void flip_spin(std::size_t i, std::size_t j);
-        int get_spin(std::size_t i, std::size_t j) const;
+        void flip_spin(long i, long j);
+        char get_spin(long i, long j) const;
         neighbors get_neighbors(unsigned i, unsigned j);
         double calc_totalU();
         double calc_totalM();
@@ -44,6 +45,7 @@ class ising
         double temp;
         double field_strength;
         char backend;
+        bool sanitize;
 
         double total_U;
         double total_M;

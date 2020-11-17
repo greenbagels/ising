@@ -20,7 +20,7 @@ class ising
         ising(std::size_t sweeps, std::size_t width, unsigned num_neighbors,
                 std::size_t nimg, unsigned scale, double temp, double fstr,
                 std::string backend);
-        double calc_deltaU(unsigned i, unsigned j);
+        double calc_deltaU(long x, long y);
         void set_display_mode(unsigned char mode);
         void set_benchmark_mode(unsigned char mode);
         void set_sanitizer(bool flag);
@@ -28,9 +28,9 @@ class ising
 
     private:
         void initialize_spins();
-        void flip_spin(long i, long j);
-        char get_spin(long i, long j) const;
-        neighbors get_neighbors(unsigned i, unsigned j);
+        void flip_spin(long x, long y);
+        char get_spin(long x, long y) const;
+        neighbors get_neighbors(long x, long y);
         double calc_totalU();
         double calc_totalM();
         void save_png_snapshot(const char* fname);

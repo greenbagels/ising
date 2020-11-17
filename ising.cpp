@@ -66,24 +66,25 @@ ising::ising(std::size_t sweeps, std::size_t width, unsigned num_neighbors,
     }
 }
 
-double ising::calc_deltaU(unsigned i, unsigned j)
+double ising::calc_deltaU(long x, long y)
 {
-    neighbors nb = get_neighbors(i, j);
+    neighbors nb = get_neighbors(x, y);
 
-    return 2 * spins[i * width + j] * (nb.top + nb.bottom + nb.left + nb.right + field_strength);
+    return 2 * get_spin(x,y) * (nb.top + nb.bottom + nb.left + nb.right + field_strength);
 }
 
-neighbors ising::get_neighbors(unsigned i, unsigned j)
+neighbors ising::get_neighbors(long x, long y)
 {
     neighbors nb;
 
-    nb.left = get_spin(i, j-1);
-    nb.right = get_spin(i, j+1);
-    nb.top = get_spin(i-1, j);
-    nb.bottom = get_spin(i+1, j);
+    // std::cerr << "Getting neighbors for (" << x << ',' << y << "):\n";
+    nb.left = get_spin(x - 1, y);
+    nb.right = get_spin(x + 1, y);
+    nb.top = get_spin(x, y - 1);
+    nb.bottom = get_spin(x, y + 1);
+    // std::cerr << nb.left << " " << nb.right << " " << nb.top << " " << nb.bottom << "\n\n";
 
-    int check = nb.left * nb.right * nb.top * nb.bottom;
-    check = check * check;
+    int check = std::abs(nb.left * nb.right * nb.top * nb.bottom);
     if (check != 1)
     {
         std::cerr << "Error: some neighbors have garbage values! " + std::to_string(check) << std::endl;
@@ -97,43 +98,25 @@ double ising::calc_totalU()
 
     // Our Hamiltonian is H = -epsilon*Sum[(s_i)(s_j)] - h sum[s_i]
     // So at every cell site, you sum neighbor interactions
-    // Let's ignore boundary conditions and only calculate grid energies
+    // BOUNDARY CONDITIONS: remember we're on a 2d torus, so we shouldn't
+    // double count the horizontal and vertical edges!
 
-    // Normal Stencil:
+    // Stencil:
     //    |
     //  --+
-    //
-    //  Right Edge Stencil:
-    //    |
-    //  --+--
-    //
-    //  Bottom Edge Stencil:
-    //    |
-    //  --+
-    //    |
-    //
-//    #pragma omp parallel for
-    for (auto i = 0; i < width; i++)
+    for (auto y = 0; y < width; y++)
     {
-        for (auto j = 0; j < width; j++)
+        for (auto x = 0; x < width; x++)
         {
             int interactions = 0;
-            neighbors nb = get_neighbors(i,j);
-
+            neighbors nb = get_neighbors(x,y);
             interactions += nb.top + nb.left;
 
-            if (i == width-1)
-            {
-                interactions += nb.bottom;
-            }
-            if (j == width-1)
-            {
-                interactions += nb.right;
-            }
-
-            total -= get_spin(i,j) * (static_cast<double>(interactions) + field_strength);
+            total -= get_spin(x,y) * (static_cast<double>(interactions) + field_strength);
         }
     }
+    if (total < - (2 + field_strength) * width * width)
+        throw std::runtime_error("Total energy calculation is wrong!");
     return total;
 }
 
@@ -153,11 +136,11 @@ double ising::calc_totalM()
 {
     auto total = 0.;
 
-    for (auto i = 0; i < width; i++)
+    for (auto y = 0; y < width; y++)
     {
-        for (auto j = 0; j < width; j++)
+        for (auto x = 0; x < width; x++)
         {
-            total += get_spin(i,j);
+            total += get_spin(x,y);
         }
     }
     return total;
@@ -219,6 +202,7 @@ void ising::initialize_spins()
     }
     total_U = calc_totalU();
     total_M = calc_totalM();
+    std::cerr << "Starting E = " << total_U << " M = " << total_M << "\n"; 
 }
 
 void ising::run()
@@ -229,17 +213,22 @@ void ising::run()
     std::uniform_real_distribution<double> floatdist;
     // We want to print `nimg` images, so we print every `iter/nimg` step. But
     // this isn't always an integer, so let's increase iter until it is.
-    for (auto T = 0.; T < 6; T += 0.01)
+    for (auto T = 0.; T < 6; T += 0.05)
     {
         // Reuse previous state:
         if (sanitize)
             initialize_spins();
 
-        auto iters = sweeps * width;
+        auto iters = sweeps * width * width;
+
+        double cU = 0.;
 
         double avg_E = 0.;
+        double cE = 0.;
         double avg_E_square = 0.;
+
         double avg_M = 0.;
+        double cM = 0.;
         double avg_M_square = 0.;
 
         std::size_t count = 0;
@@ -247,19 +236,29 @@ void ising::run()
         data.cf.push_back(std::vector<double>(width / 2, 0.));
         data.T.push_back(T);
         std::cerr << "Performing " << iters << " iterations...\n";
+        std::vector<double> temp1;
+        std::vector<double> temp2;
         for (auto t = 0; t < iters; t++)
         {
-            auto i = dist(engine);
-            auto j = dist(engine);
-            auto dU = calc_deltaU(i, j);
+            auto x = dist(engine);
+            auto y = dist(engine);
+            auto dU = calc_deltaU(x, y);
+
+            if (std::abs(dU) > 2 * (4 + field_strength))
+            {
+                throw std::runtime_error("Energy growing too fast!");
+            }
 
             if (dU <= 0.)
             {
                 //auto u1 = calc_totalU();
-                flip_spin(i,j);
+                flip_spin(x,y);
                 //auto u2 = calc_totalU();
-                total_U += dU;
-                total_M += 2*get_spin(i,j);
+                double yU = dU - cU;
+                double tU = total_U + yU;
+                cU = (tU - total_U) - yU;
+                total_U = tU;
+                total_M += 2*get_spin(x,y);
 
                 //auto totald = (u2-u1) - dU;
                 // TODO: diagnose why we are getting errors as bad as 2...
@@ -275,22 +274,32 @@ void ising::run()
                 {
                     if (floatdist(engine) < std::exp(-dU / T))
                     {
-                        flip_spin(i,j);
-                        total_U += dU;
-                        total_M += 2*get_spin(i,j);
+                        flip_spin(x,y);
+                        double yU = dU - cU;
+                        double tU = total_U + yU;
+                        cU = (tU - total_U) - yU;
+                        total_U = tU;
+                        total_M += 2*get_spin(x,y);
                     }
                 }
             }
 
             if (!(t % width * width) && t > 100*width * width)
             {
-
+                temp1.push_back(total_U);
+                temp2.push_back(total_M);
                 // Equilibrium sweeps contribute to equilibirum averages
-                avg_E += total_U;
-                avg_E_square += total_U * total_U;
-                avg_M += total_M;
-                avg_M_square += total_M * total_M;
+                auto yE = total_U - cE;
+                auto tE = avg_E + yE;
+                cE = (tE - avg_E) - yE;
+                avg_E = tE;
 
+                auto yM = total_M - cM;
+                auto tM = avg_M + yM;
+                cM = (tM - avg_M) - yM;
+                avg_M = tM;
+
+                /*
                 auto avg_spin = 0.;
 
                 for (auto i = 0u; i < width; i++)
@@ -318,14 +327,8 @@ void ising::run()
                     correlation = correlation / count - avg_spin * avg_spin;
                     data.cf.back()[i] += correlation;
                 }
-
-                /*
-                if (t >  iters - 5000 * width * width)
-                {
-                    data.M_sweeps.push_back(M);
-                    data.E_sweeps.push_back(E);
-                }
                 */
+
                 count++;
             }
 
@@ -349,13 +352,40 @@ void ising::run()
         }
 
         avg_E /= count;
-        avg_E_square /= count;
+        std::cerr << "avg_E is now " << avg_E << '\n';
         avg_M /= count;
+
+
+        cE = 0.;
+        cM = 0.;
+        for (auto i = 0; i < temp1.size(); i++)
+        {
+            double a = temp1[i] - avg_E;
+            double b = temp2[i] - avg_M;
+            a *= a;
+            b *= b;
+            if (a < 0. || b < 0.)
+                throw std::runtime_error("squaring overflow?");
+
+            auto yE = a - cE;
+            auto tE = avg_E_square + yE;
+            cE = (tE - avg_E_square) - yE;
+            avg_E_square = tE;
+
+            auto yM = b - cM;
+            auto tM = avg_M_square + yM;
+            cM = (tM - avg_M_square) - yM;
+            avg_M_square = tM;
+        }
+        avg_E_square /= count;
         avg_M_square /= count;
+
+        /*
         for (auto i = 0; i != data.cf.back().size(); i++)
         {
             data.cf.back()[i] /= count;
         }
+        */
 
         /*
         auto start_i = 0;
@@ -378,20 +408,21 @@ void ising::run()
         // The entropy at T=0 is zero, but at any other state we get it by forward-derivatives:
         data.S.push_back(T == 0. ? 0. : data.S.back() + (avg_E - data.avg_E.back())/ T); 
         data.avg_E.push_back(avg_E);
-        data.E_fluc.push_back(avg_E_square - avg_E * avg_E);
+        data.E_fluc.push_back(avg_E_square);
         data.avg_M.push_back(avg_M);
-        data.M_fluc.push_back(avg_M_square - avg_M * avg_M);
+        data.M_fluc.push_back(avg_M_square);
         // The heat capacity is the energy fluctiation divided by Temp^2:
         data.C_v.push_back( T == 0. ? NAN : data.M_fluc.back() / (T * T));
         // data.cf_len.push_back(corr_len);
-        std::cerr << "Equilibrium E: " << data.avg_E.back() << std::endl;
+        std::cerr << "Equilibrium E: " << avg_E << std::endl;
+        avg_E = 0.;
     }
 
     std::ofstream f1("output_" + std::to_string(width) + ".dat");
 
     for (auto i = 0; i < data.T.size(); i++)
     {
-        f1 << static_cast<double>(i)*0.01 << " " << data.avg_E[i] << " " << data.E_fluc[i] << " " << data.avg_M[i] << " " << data.M_fluc[i] << " " << data.S[i] << " " << data.C_v[i] << "\n";
+        f1 << static_cast<double>(i)*0.05 << " " << data.avg_E[i] << " " << data.E_fluc[i] << " " << data.avg_M[i] << " " << data.M_fluc[i] << " " << data.S[i] << " " << data.C_v[i] << "\n";
     }
 
     std::ofstream f2("sweeps_" + std::to_string(width) + ".dat");
@@ -405,38 +436,45 @@ void ising::run()
 
     for (auto j = 0; j < data.cf.back().size(); j++)
     {
-       f3 << j << " " << data.cf[15][j] << "\n";
+       f3 << j * 0.05;
+       for (auto k = 0; k < data.cf.size(); k++)
+       {
+           f3 << " " << data.cf[k][j];
+       }
+       f3 << "\n";
     }
 }
 
-inline void ising::flip_spin(long i, long j)
+inline void ising::flip_spin(long x, long y)
 {
-    auto spin = get_spin(i,j);
+    auto spin = get_spin(x,y);
 
     if (spin * spin != 1)
     {
         throw std::runtime_error("Invalid spin detected");
     }
-    spins[i * width + j] = -spin;
+    spins[y * width + x] = -spin;
 }
 
-char ising::get_spin(long i, long j) const
+char ising::get_spin(long x, long y) const
 {
+    x = x % width;
+    y = y % width;
     // We will manually enforce periodic BCs here:
-    long modi, modj;
-    modi = i % static_cast<long>(width);
-    modj = j % static_cast<long>(width);
-
-    if (modi < 0)
+    if (x < 0)
     {
-        modi += width;
+        // std::cerr << "Correcting value " << x;
+        x += width;
+        // std::cerr << " to " << x << '\n';
     }
-    if (modj < 0)
+    if (y < 0)
     {
-        modj += width;
+        // std::cerr << "Correcting value " << y;
+        y += width;
+        // std::cerr << " to " << y << '\n';
     }
 
-    return spins[modi * width + modj];
+    return spins[y * width + x];
 }
 
 void ising::save_png_snapshot(const char* fname)

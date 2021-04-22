@@ -8,6 +8,7 @@ class wolff
 {
     public:
         wolff(int n, int w, int scale, double temp);
+        ~wolff();
 
         void iterate();
         void run();

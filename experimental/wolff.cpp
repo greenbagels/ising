@@ -7,8 +7,8 @@
 #include <png++/png.hpp>
 #include "wolff.hpp"
 
-wolff::wolff(int n, int w, int pix_scale, double temp)
-    : width(w), sweeps(n), scale(pix_scale), T(temp), engine(6)
+wolff::wolff(int w, int pix_scale, double temp)
+    : width(w), scale(pix_scale), T(temp), engine(6)
 {
     grid = new int[width*width];
     randomize_grid();
@@ -139,7 +139,7 @@ void wolff::iterate()
 }
 
 
-void wolff::run()
+void wolff::run(int sweeps)
 {
     while (sweeps--)
     {

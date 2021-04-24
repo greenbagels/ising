@@ -7,11 +7,11 @@
 class wolff
 {
     public:
-        wolff(int n, int w, int scale, double temp);
+        wolff(int w, int scale, double temp);
         ~wolff();
 
         void iterate();
-        void run();
+        void run(int sweeps);
         void print_to_file(std::string filename);
     private:
         void randomize_grid();
@@ -22,7 +22,6 @@ class wolff
         // Grid variables
         int* grid;
         int width;
-        int sweeps;
         int scale;
 
         // Dynamics

@@ -21,7 +21,7 @@ namespace ising
     {
         // The class should be initialized in a usable state. The ctor arguments
         // ask for everything required to make this possible.
-        grid = new int[width*width];
+        grid = std::unique_ptr<int[]>(new int[width*width]);
         randomize_grid();
         calculate_M();
         calculate_U();
@@ -31,13 +31,6 @@ namespace ising
             throw std::runtime_error("Error: backend not supported!");
         }
         algo_backend = backend;
-    }
-
-    simulation::~simulation()
-    {
-        // TODO: change grid to be wrapped in a unique_ptr, so we can rely on auto
-        // dtor generation
-        delete[] grid;
     }
 
     void simulation::randomize_grid()

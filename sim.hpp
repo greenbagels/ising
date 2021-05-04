@@ -11,6 +11,7 @@
 #include <string>
 #include <random>
 #include <functional>
+#include <memory>
 
 namespace ising
 {
@@ -20,11 +21,6 @@ namespace ising
             /*! Construct the class and intiialize class invariants */
             simulation(int w, double temp, double field,
                     bool randomize, int backend);
-            /*! We need this explicitly to free our grid
-             * TODO: wrap pointer in std::unique_ptr so that we can rely on default
-             * dtors
-             */
-            ~simulation();
 
             /*! Performs one iteration of the Wolff algorithm, preserving detailed balance */
             int iterate();
@@ -70,7 +66,7 @@ namespace ising
             int wolff_cluster_flip();
 
             // Grid variables
-            int* grid;
+            std::unique_ptr<int[]> grid;
             int width;
 
             // Determines whether to reset the grid bet

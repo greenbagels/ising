@@ -38,6 +38,9 @@ class wolff
         /*! Calculates the *total* grid interaction energy, including the field */
         void calculate_U();
 
+        /*! Calculates the equal-time correlation function at separation r */
+        double calc_cf(int r);
+
         /*! Exposes the current temperature */
         double get_T() const;
         /*! Exposes the total magnetization */

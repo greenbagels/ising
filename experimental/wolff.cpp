@@ -22,7 +22,7 @@ wolff::wolff(int w, double temp, double field, bool randomize)
     randomize_grid();
     calculate_M();
     calculate_U();
-    std::cerr << "Starting M: " << M << "\nStarting U: " << U << std::endl;
+    // std::cerr << "Starting M: " << M << "\nStarting U: " << U << std::endl;
 }
 
 wolff::~wolff()
@@ -87,6 +87,30 @@ void wolff::calculate_U()
         }
     }
     U = total_U;
+}
+
+double wolff::calc_cf(int r)
+{
+    // The average spin is just the Magnetization / (width * width), so
+    // we calculate <spin1 * spin2> - <spin>, where spin1 and spin2 are
+    // a distance r apart:
+    auto num_pairs = 2 * width * width;
+    double avg_spin_sq = M / (width * width);
+    avg_spin_sq *= avg_spin_sq;
+    double cf = 0.;
+    for (auto y = 0; y < width; y++)
+    {
+        for (auto x = 0; x < width; x++)
+        {
+            auto spin = 2*(*get_spin(x,y))-1;
+            auto spinR = 2*(*get_spin(x+r,y))-1;
+            // auto spinL = 2*(*get_spin(x-r,y))-1;
+            // auto spinU = 2*(*get_spin(x,y-r))-1;
+            auto spinD = 2*(*get_spin(x,y+r))-1;
+            cf += spin * (spinR + /*spinL + spinU +*/ spinD);
+        }
+    }
+    return cf / num_pairs - avg_spin_sq;
 }
 
 double wolff::get_M() const

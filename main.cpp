@@ -36,8 +36,10 @@
 #include <fmt/core.h>
 #include <boost/program_options.hpp>
 
-void do_block_calc(double Tmin, double dT, int count, double H, int width, bool randomize,
-        double *U_avg, double *U_fluc, double *M_avg, double *M_fluc, double *correl_fun, int backend);
+void do_block_calc(double Tmin, double dT, int count, double H, int width,
+        bool randomize, double *U_avg, double *U_fluc, double *M_avg, double *M_fluc,
+        double *correl_fun, double *correl_fun_err, int backend
+        /*, double *sweep_avg, double *sweep_stdev, double *cf_avg, double *cf_stdev*/);
 
 int main(int argc, char *argv[])
 {
@@ -115,8 +117,19 @@ int main(int argc, char *argv[])
     // We need a correlation function for each temperature. But for a given
     // temperature, the CF is a function of x in [1, width/2]
     std::unique_ptr<double[]> correl_fun(new double[N * (width / 2)]());
+    std::unique_ptr<double[]> correl_fun_err(new double[N * (width / 2)]());
 
     std::unique_ptr<std::thread[]> threads(new std::thread[nthreads]);
+
+    /*
+    // These track the time it takes for each sweep to complete as a function
+    // of temperature and sweep number
+    std::unique_ptr<double[]> sweep_t_avgs(new double[N * 500]());
+    std::unique_ptr<double[]> sweep_t_stdev(new double[N * 500]());
+    // Same thing, but as for the correlation function as a function of temp
+    std::unique_ptr<double[]> cf_t_avgs(new double[N]());
+    std::unique_ptr<double[]> cf_t_stdev(new double[N]());
+    */
 
     int offset = 0;
     for (auto i = 0; i < nthreads; i++)
@@ -135,7 +148,8 @@ int main(int argc, char *argv[])
         std::cout << "Spawning thread " << i << std::endl;
         threads[i] = std::thread(do_block_calc, tmin + dt * offset, dt, blocksize, field, width,
                 randomize, &U_avg[offset], &U_fluc[offset], &M_avg[offset], &M_fluc[offset], &correl_fun[offset * (width/2)],
-                backend);
+                &correl_fun_err[offset * (width/2)], backend
+                /*, &sweep_t_avgs[offset * 500], &sweep_t_stdev[offset * 500], &cf_t_avgs[offset], &cf_t_stdev[offset]*/);
         offset += blocksize;
     }
 
@@ -154,16 +168,34 @@ int main(int argc, char *argv[])
 
         for (auto j = 0; j < width/2; j++)
         {
-            cf_ofile << j << " " << correl_fun[i * (width/2) + j] << std::endl;
+            cf_ofile << j << " " << correl_fun[i * (width/2) + j] << " " << correl_fun_err[i * (width/2) + j] << std::endl;
         }
     }
+
+    /*
+    for (auto i = 0; i < N; i++)
+    {
+        std::ofstream sweep_t_file(output_dir + "sweeps_" + std::to_string(tmin + i*dt) + ".dat");
+        std::ofstream cf_t_file(output_dir + "cf_" + std::to_string(tmin + i*dt) + ".dat");
+        for (auto j = 0; j < 500; j++)
+        {
+            sweep_t_file << tmin + i*dt << " "
+                         << j << " "
+                         << sweep_t_avgs[i * 500 + j] << " "
+                         << sweep_t_stdev[i * 500 + j] << std::endl;
+        }
+        cf_t_file << tmin + i*dt << " " << cf_t_avgs[i] << " " << cf_t_stdev[i] << std::endl;
+    }
+    */
 
     return 0;
 }
 
 // TODO: rename
 void do_block_calc(double Tmin, double dT, int count, double H, int width,
-        bool randomize, double *U_avg, double *U_fluc, double *M_avg, double *M_fluc, double *correl_fun, int backend)
+        bool randomize, double *U_avg, double *U_fluc, double *M_avg, double *M_fluc,
+        double *correl_fun, double *correl_fun_err, int backend/*, double *sweep_avg, double *sweep_stdev,
+        double *cf_avg, double *cf_stdev*/)
 {
     // spawning many ephemeral threads is inefficient, so we use persistent
     // pthreads to handle our data.
@@ -172,11 +204,43 @@ void do_block_calc(double Tmin, double dT, int count, double H, int width,
     // an ensemble of N different configurations through time, measuring the
     // dynamical variables of each configuration through time.
     // Now, make a sim object for this block
+    /* Cluster benchmarking
+    for (auto tidx = 0; tidx < count; tidx++)
+    {
+        std::unique_ptr<double[]> times_total(new double[100 * 500]);
+        for (auto rep = 0; rep < 100; rep++)
+        {
+            ising::simulation sim(width, Tmin + tidx * dT, H, randomize, backend);
+            for (auto i = 0; i < 500; i++)
+            {
+                // Time for pre-sweeps! We should probable scale this with the temperature,
+                // but for now, we just do a large amount for each starting temperature, and
+                // hope the scaling works out well by reusing the grid
+                auto start = std::chrono::steady_clock::now();
+                sim.iterate();
+                auto end = std::chrono::steady_clock::now();
+                std::chrono::duration<double> diff = end - start;
+                sweep_avg[tidx * 500 + i] += diff.count();
+                times_total[rep * 500 + i] = diff.count();
+            }
+        }
+
+        for (auto i = 0; i < 500; i++)
+        {
+            sweep_avg[tidx * 500 + i] /= 100;
+            for (auto rep = 0; rep < 100; rep++)
+            {
+                sweep_stdev[tidx * 500 + i] +=
+                    (times_total[rep * 500 + i] - sweep_avg[tidx * 500 + i]) *
+                    (times_total[rep * 500 + i] - sweep_avg[tidx * 500 + i]);
+            }
+            sweep_stdev[tidx * 500 + i] = std::sqrt(sweep_stdev[tidx * 500 + i]) / 100;
+        }
+    }
+    */
+
     ising::simulation sim(width, Tmin, H, randomize, backend);
-    // Time for pre-sweeps! We should probable scale this with the temperature,
-    // but for now, we just do a large amount for each starting temperature, and
-    // hope the scaling works out well by reusing the grid
-    sim.run(20000);
+    sim.run(10000);
 
     for (auto i = 0; i < count; i++)
     {
@@ -191,7 +255,9 @@ void do_block_calc(double Tmin, double dT, int count, double H, int width,
 
         // Now, start the averaging loop!
         std::vector<double> M, U;
-        for (auto n = 0; n < 50000; n++)
+        auto avg_total = 1000;
+        std::unique_ptr<double[]> cfs_total(new double[avg_total * width / 2]());
+        for (auto n = 0; n < avg_total; n++)
         {
             // We want to record data while minimizing autocorrelations. To do this, we
             // iterate until at least width*width spins have flipped; we cannot stop in
@@ -214,15 +280,36 @@ void do_block_calc(double Tmin, double dT, int count, double H, int width,
             // a distance r apart:
 
             // Consider loop re-odering if this is too slow!
+            // auto start = std::chrono::steady_clock::now();
             for (auto r = 0; r < width / 2; r++)
             {
-                correl_fun[i * (width/2) + r] += sim.calc_cf(r);
+                cfs_total[n * (width / 2) + r] = sim.calc_cf(r);
+                correl_fun[i * (width / 2) + r] += cfs_total[n * (width / 2) + r];
             }
+            // auto end = std::chrono::steady_clock::now();
+            // std::chrono::duration<double> diff = end - start;
+            // cf_avg[i] += diff.count();
+            // cfs_total[n] = diff.count();
         }
-
+       //  cf_avg[i] /= 100;
+        /*
+        for (auto n = 0; n < 100; n++)
+        {
+            cf_stdev[i] += (cf_avg[i] - cfs_total[n]) * (cf_avg[i] - cfs_total[n]);
+            cf_stdev[i] = std::sqrt(cf_stdev[i]) / 100;
+        }
+        */
         for (auto r = 0; r < width / 2; r++)
         {
-            correl_fun[i * (width/2) + r] /= 50000;
+            double err = 0.;
+            correl_fun[i * (width/2) + r] /= avg_total;
+            for (auto n = 0; n < avg_total; n++)
+            {
+                err += (correl_fun[i * (width / 2) + r] - cfs_total[n * (width / 2) + r])
+                    * (correl_fun[i * (width / 2) + r] - cfs_total[n * (width / 2) + r]);
+            }
+            err = std::sqrt(err) / avg_total;
+            correl_fun_err[i * (width / 2) + r] = err;
         }
 
         for (auto j = 0; j < M.size(); j++)

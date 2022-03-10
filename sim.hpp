@@ -12,6 +12,7 @@
 #include <random>
 #include <functional>
 #include <memory>
+#include "grid.hpp"
 
 namespace ising
 {
@@ -66,7 +67,8 @@ namespace ising
             int wolff_cluster_flip();
 
             // Grid variables
-            std::unique_ptr<int[]> grid;
+            grid spin_grid;
+            int dim;
             int width;
 
             // Determines whether to reset the grid bet

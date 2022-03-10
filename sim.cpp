@@ -16,12 +16,17 @@
 
 namespace ising
 {
-    simulation::simulation(int w, double temp, double field, bool randomize, int backend)
-        : width(w), T(temp), engine(randomize ? std::random_device()() : 6)
+    simulation::simulation(int d, int w, double temp, double field, bool randomize, int backend)
+        : dim(d), width(w) spin_grid(, T(temp), engine(randomize ? std::random_device()() : 6)
     {
         // The class should be initialized in a usable state. The ctor arguments
         // ask for everything required to make this possible.
-        grid = std::unique_ptr<int[]>(new int[width*width]);
+        auto gridsize = width;
+        for (auto i = 1; i < dim; i++)
+        {
+            gridsize *= width;
+        }
+        grid = std::vector<int>(gridsize);
         randomize_grid();
         calculate_M();
         calculate_U();
@@ -35,13 +40,9 @@ namespace ising
 
     void simulation::randomize_grid()
     {
-        for (auto y = 0; y < width; y++)
+        for (auto i = spin_grid.begin(); i != spin_grid.end(); i++)
         {
-            // loop ordered for cache optimization, in case the compiler doesn't notice.
-            for (auto x = 0; x < width; x++)
-            {
-                *get_spin(x, y) = rand_int(0,1);
-            }
+            *i = rand_int(0,1);
         }
     }
 
@@ -62,7 +63,7 @@ namespace ising
                 // and just total the 1s, and add -1(width*width-total). But
                 // this would hide any errors in our spin flipping routines,
                 // so for now, we explicitly calculate the sum over all spins.
-                total_M += 2 * (*get_spin(j, i)) - 1;
+                total_M += 2 * spin_grid[{i, j}] - 1;
             }
         }
         M = total_M;
@@ -81,9 +82,9 @@ namespace ising
                 // In this case, we're using pixel coordinates [(0,0) = top left corner]
                 // So checking bottom and right corresponds to (x+1,y) and (x,y+1).
                 // We're also mapping (0,1) to (-1,1) with f(x)=2*x-1
-                auto site_spin = 2 * (*get_spin(j,i)) - 1;
-                auto right_spin = 2 * (*get_spin(j+1,i)) - 1;
-                auto bot_spin = 2 * (*get_spin(j,i+1)) - 1;
+                auto site_spin = 2 * spin_grid[{i, j}] - 1;
+                auto right_spin = 2 * spin_grid[{i + 1, j}] - 1;
+                auto bot_spin = 2 * spin_grid[{i, j + 1}] - 1;
                 total_U -= site_spin * (right_spin + bot_spin);
             }
         }
